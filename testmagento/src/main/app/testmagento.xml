@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:tracking="http://www.mulesoft.org/schema/mule/ee/tracking" xmlns:magento="http://www.mulesoft.org/schema/mule/magento" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:spring="http://www.springframework.org/schema/beans" version="EE-3.5.0"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-current.xsd
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/magento http://www.mulesoft.org/schema/mule/magento/current/mule-magento.xsd
+http://www.mulesoft.org/schema/mule/ee/tracking http://www.mulesoft.org/schema/mule/ee/tracking/current/mule-tracking-ee.xsd">
+    <magento:config name="Magento" username="badesreenu" password="Sreen!1982" address="http://localhost:9090/magento/index.php/api/v2_soap/index/" doc:name="Magento">
+        <magento:connection-pooling-profile initialisationPolicy="INITIALISE_ONE" exhaustedAction="WHEN_EXHAUSTED_GROW"/>
+    </magento:config>
+	
+    <flow name="testmagentoFlow1" doc:name="testmagentoFlow1">
+        <http:inbound-endpoint exchange-pattern="request-response" host="localhost" port="8090" doc:name="HTTP" path="ShoppingCartFlow"/>
+        <magento:create-product config-ref="Magento" type="simple" set="4" sku="002" storeViewIdOrCode="2" doc:name="CreateProduct">
+           <magento:attributes name="iPod Nano_1" description="iPod Nano 8GB " short_description="8GB" weight="100" status="1"  price="3000" tax_class_id="1" special_from_date="12-07-2014" special_price="2500" special_to_date="12-08-2014" visibility="&quot;Catalog, Search&quot;" url_key="magentoproduct">
+               <magento:stock_data qty="1" is_in_stock="1" min_qty="1"/>
+           </magento:attributes>
+        </magento:create-product>
+        <object-to-string-transformer doc:name="Object to String"/>
+        <set-property propertyName="productId" value="#[payload]" doc:name="Store Product Id"/>
+        <magento:update-inventory-stock-item config-ref="Magento" productId="#[groovy:message.getProperty('productId')]" doc:name="Update Inventory Stock Item">
+            <magento:catalog-inventory-stock-item qty="100"/>
+        </magento:update-inventory-stock-item>
+        <set-payload value="OutPut : #[message.payloadAs(java.lang.String)]" doc:name="Set Payload"/>
+    </flow>
+    <!-- <sub-flow name="CreateProdutFlow" doc:name="CreateProdutFlow">
+        <magento:create-product config-ref="Magento" type="simple" set="4" sku="001" storeViewIdOrCode="1" doc:name="CreateProduct"/>
+        <set-property propertyName="productId" value="#[payload]" doc:name="Store Product Id"/>
+        <magento:update-inventory-stock-item config-ref="Magento" productId="#[groovy:message.getPropert('productId')]" doc:name="Update Inventory Stock Item"/>
+    </sub-flow> -->
+</mule>

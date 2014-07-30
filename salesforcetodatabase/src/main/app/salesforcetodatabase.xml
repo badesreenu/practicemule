@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:context="http://www.springframework.org/schema/context"
+	xmlns:scripting="http://www.mulesoft.org/schema/mule/scripting" xmlns:tracking="http://www.mulesoft.org/schema/mule/ee/tracking" xmlns:jdbc-ee="http://www.mulesoft.org/schema/mule/ee/jdbc" xmlns:batch="http://www.mulesoft.org/schema/mule/batch" xmlns:data-mapper="http://www.mulesoft.org/schema/mule/ee/data-mapper" xmlns:sfdc="http://www.mulesoft.org/schema/mule/sfdc" xmlns:db="http://www.mulesoft.org/schema/mule/db" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:spring="http://www.springframework.org/schema/beans" version="EE-3.5.0"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context-current.xsd
+http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-current.xsd
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/batch http://www.mulesoft.org/schema/mule/batch/current/mule-batch.xsd
+http://www.mulesoft.org/schema/mule/sfdc http://www.mulesoft.org/schema/mule/sfdc/current/mule-sfdc.xsd
+http://www.mulesoft.org/schema/mule/ee/jdbc http://www.mulesoft.org/schema/mule/ee/jdbc/current/mule-jdbc-ee.xsd
+http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+http://www.mulesoft.org/schema/mule/ee/data-mapper http://www.mulesoft.org/schema/mule/ee/data-mapper/current/mule-data-mapper.xsd
+http://www.mulesoft.org/schema/mule/ee/tracking http://www.mulesoft.org/schema/mule/ee/tracking/current/mule-tracking-ee.xsd
+http://www.mulesoft.org/schema/mule/scripting http://www.mulesoft.org/schema/mule/scripting/current/mule-scripting.xsd">
+    <sfdc:config name="Salesforce" username="badesreenu@gmail.com" password="Sreen!1982" securityToken="mVTWxFY0Y4jkXI64gTXUf10M" doc:name="Salesforce">
+        <sfdc:connection-pooling-profile initialisationPolicy="INITIALISE_ONE" exhaustedAction="WHEN_EXHAUSTED_GROW"/>
+    </sfdc:config>
+    <jdbc-ee:mssql-data-source name="MS_SQL_Data_Source" user="sa" password="Admin@123" url="jdbc:sqlserver://localhost;databaseName=TestDB" transactionIsolation="UNSPECIFIED" doc:name="MS SQL Data Source"/>
+    <jdbc-ee:connector name="Database" dataSource-ref="MS_SQL_Data_Source" validateConnections="true" queryTimeout="-1" pollingFrequency="0" doc:name="Database"/>
+    <data-mapper:config name="contact_to_pojo" transformationGraphPath="contact_to_pojo.grf" doc:name="contact_to_pojo"/>
+   
+    <batch:job name="salesforcetodatabaseBatch1">
+        <batch:threading-profile poolExhaustedAction="WAIT"/>
+        <batch:input>
+            <poll doc:name="Poll">
+                <fixed-frequency-scheduler frequency="60" startDelay="10" timeUnit="SECONDS"/>
+                <watermark default-expression="#['1900-12-11T14:16:00.000Z']" selector="MAX" selector-expression="#[payload.LastModifiedDate]" variable="timestamp"/>
+                <sfdc:query config-ref="Salesforce" query="dsql:SELECT Email,FirstName,LastModifiedDate,LastName FROM Contact" doc:name="Salesforce"/>
+            </poll>
+        </batch:input>
+        <batch:process-records>
+             <batch:step name="Batch_Step">
+                <data-mapper:transform config-ref="contact_to_pojo" doc:name="Contact To Pojo"/>
+				<enricher doc:name="Message Enricher">
+                    <jdbc-ee:outbound-endpoint exchange-pattern="one-way" queryKey="Select" queryTimeout="-1" connector-ref="Database" doc:name="Check existence in Database">
+                        <jdbc-ee:query key="Select" value="SELECT first_name,last_name,email FROM [TestDB].[dbo].[contact] WHERE email=#[payload.email]"/>
+                    </jdbc-ee:outbound-endpoint>
+                    <enrich source="#[recordVars['dbRecord'].first_name ==null]" target="#[recordVars['exists']]"/>
+                    <enrich source="#[payload]" target="#[recordVars['dbRecord']]"/>
+                </enricher>                           
+            </batch:step>
+           
+            <batch:step name="Batch_Step1">
+            <logger message="Choice Str is :#[payload] : #[recordVars['exists']] :#[recordVars['dbRecord'].first_name]" level="INFO" doc:name="Logger"/>
+                <choice doc:name="Choice" tracking:enable-default-events="true">
+                    <when expression="#[recordVars['exists']==false]">
+                        <logger message="Test insert : #[payload]" level="INFO" doc:name="Logger"/>
+                        <jdbc-ee:outbound-endpoint exchange-pattern="one-way" queryTimeout="-1" connector-ref="Database" doc:name="Create Contact" queryKey="Insert">
+                            <jdbc-ee:query key="Insert" value="INSERT INTO [TestDB].[dbo].[contact] (first_name, last_name, email,last_modified) VALUES (#[payload.first_name],#[payload.last_name],#[payload.email],CURRENT_TIMESTAMP)"/>
+                        </jdbc-ee:outbound-endpoint>
+                    </when>
+                    <when expression="#[recordVars['exists']==true and recordVars['dbRecord'] != null]">
+                        <logger message="Update : #[payload]" level="INFO" doc:name="Logger"/>
+                        <jdbc-ee:outbound-endpoint exchange-pattern="one-way" queryKey="Update" queryTimeout="-1" connector-ref="Database" doc:name="Update Contact">
+                            <jdbc-ee:query key="Update" value="UPDATE [TestDB].[dbo].[contact] SET first_name=#[payload.first_name],last_name=#[payload.last_name],last_modified=CURRENT_TIMESTAMP WHERE email = #[payload.email]"/>
+                        </jdbc-ee:outbound-endpoint>
+                    </when>
+                    <otherwise>
+                        <logger message="There is no data" level="INFO" doc:name="Logger"/>
+                    </otherwise>
+                </choice>
+            </batch:step>
+        </batch:process-records>
+        <batch:on-complete>
+            <logger message="Completed Successfully." level="INFO" doc:name="Logger"/>
+        </batch:on-complete>
+    </batch:job>
+</mule>
